@@ -1,8 +1,4 @@
 numpy
-pandas
-seaborn
-matplotlib
 tensorflow
-keras
-keras-tuner
-opencv-python
+opencv-python-headless
+flask
