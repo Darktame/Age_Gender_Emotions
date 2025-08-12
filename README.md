@@ -1,12 +1,27 @@
 #  Age, Gender & Emotions Detection 
 
 A deep learning project to analyze human faces and predict:
-- **Age group** (0-80)
-- **Gender** (male / female)
-- **Emotion**(['angry', 'fearful', 'happy', 'neutral', 'sad', 'surprised'])
+- **Age group** - 0 to 80
+- **Gender** - Male, Female
+- **Emotion** - Angry, Fearful, Happy, Neutral, Sad, Surprised
 
-Built with TensorFlow/Keras and OpenCV, this project offers pre-trained models ready for inference.
+Built with TensorFlow and OpenCV, this project offers pre-trained models ready for inference.
 
+## Usage
+Install dependencies
+```sh
+$ pip install -r requirements.txt
+```
+
+### Webapp
+```sh
+$ flask run
+```
+
+### Application
+```sh
+$ python cnn_project.py
+```
 
 ##  Features
 - Detects **age**, **gender**, and **emotion** from a single image or webcam feed
@@ -15,17 +30,5 @@ Built with TensorFlow/Keras and OpenCV, this project offers pre-trained models r
 - Real-time or image-based processing
 
 ## Datasets Used
-UTKFace – age & gender
-FER2013 – emotion detection
-
-## Age-Gender-Emotion-Detection
-── .gitattributes                 # Git LFS tracking config for large files
-── Emotion_detection_best_model.h5 # Trained model for emotion detection
-── age_gender_best_model.h5        # Trained model for age & gender detection
-── age-gender-detection.ipynb      # Notebook for age & gender detection
-── emotion-detection.ipynb         # Notebook for emotion detection
-── cnn_project.py                  # Python script combining all detections (live detection)
-── deploy.prototxt                 # Face detection architecture file
-── res10_300x300_ssd_iter_140000.caffemodel # Pre-trained face detection weights
-── Requirements.txt                # Required Python dependencies
-── README.md                       # Project documentation
+- UTKFace – Age and gender
+- FER2013 – Emotion detection

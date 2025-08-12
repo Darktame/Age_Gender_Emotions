@@ -1,26 +1,18 @@
 import os
-import os
 import sys
+import base64
 import cv2
 import numpy as np
+from flask import Flask, render_template, request, jsonify
 from collections import deque
 
-# Keep TensorFlow quiet and force CPU if no GPU is needed
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", os.environ.get("TF_CPP_MIN_LOG_LEVEL", "2"))
-os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 # Quiet down TensorFlow and oneDNN noise before importing TF
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", os.environ.get("TF_CPP_MIN_LOG_LEVEL", "2"))
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 from tensorflow.keras.models import load_model
 
-# Load pre-trained models
-age_gender_model = load_model("models/age_gender.h5", compile=False)
-emotion_model = load_model("models/emotion.h5", compile=False)
-
-# Labels
-gender_labels = ["Male", "Female"]
-emotion_labels = ["angry", "fearful", "happy", "neutral", "sad", "surprised"]
+app = Flask(__name__)
 
 # Silence OpenCV logs if supported
 try:
@@ -31,27 +23,27 @@ except Exception:
     except Exception:
         pass
 
+# Load models
+try:
+    age_gender_model = load_model("models/age_gender.h5", compile=False)
+    emotion_model    = load_model("models/emotion.h5", compile=False)
+except Exception as e:
+    print(f"Error loading Keras models: {e}")
+    sys.exit(1)
+
+# Labels
+gender_labels  = ["Male", "Female"]
+emotion_labels = ['angry', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
+
 # Face detector
 try:
     net = cv2.dnn.readNetFromCaffe(
-        "deploy.prototxt", "res10_300x300_ssd_iter_140000.caffemodel"
+        "deploy.prototxt",
+        "res10_300x300_ssd_iter_140000.caffemodel"
     )
 except Exception as e:
     print(f"Error loading face detector: {e}")
     sys.exit(1)
-
-# Video setup
-video = cv2.VideoCapture(0)
-video.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-video.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-video.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-if not video.isOpened():
-    print("Error: Could not open default camera (index 0).")
-    sys.exit(1)
-
-# Use a single, pre-created window (prevents duplicate windows on some Linux backends)
-WIN_NAME = "AgeGenderEmotion"
-cv2.namedWindow(WIN_NAME, cv2.WINDOW_NORMAL)
 
 # Buffers
 age_buffer = deque(maxlen=10)
@@ -63,7 +55,6 @@ try:
     shape = emotion_input_shape
     if isinstance(shape, list) and len(shape) == 1:
         shape = shape[0]
-    # Prefer channels-last if recognizable
     if isinstance(shape, (list, tuple)) and len(shape) >= 4 and shape[-1] in (1, 3):
         emotion_channels = int(shape[-1])
     elif isinstance(shape, (list, tuple)) and len(shape) >= 4 and shape[1] in (1, 3):
@@ -73,24 +64,41 @@ try:
 except Exception:
     emotion_channels = 1
 
-try:
-    while True:
-        ret, frame = video.read()
-        if not ret:
-            break
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-        frame = cv2.flip(frame, 1)
-        H, W = frame.shape[:2]
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        # Receive Base64 image
+        if not request.is_json or 'image' not in request.json:
+            return jsonify({"error": "Missing 'image' in JSON body"}), 400
+        data = request.json['image']
+        encoded = data.split(',')[1]  # remove data:image/jpeg;base64,
+        try:
+            img_bytes = base64.b64decode(encoded)
+        except Exception:
+            return jsonify({"error": "Invalid base64 image data"}), 400
+
+        # Convert to NumPy array
+        np_arr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"error": "Failed to decode image"}), 400
+        H, W  = frame.shape[:2]
 
         # Face detection
         blob = cv2.dnn.blobFromImage(
             cv2.resize(frame, (300, 300)),
             scalefactor=1.0,
             size=(300, 300),
-            mean=(104.0, 177.0, 123.0),
+            mean=(104.0, 177.0, 123.0)
         )
         net.setInput(blob)
         detections = net.forward()
+
+        results = []
 
         for i in range(detections.shape[2]):
             conf = float(detections[0, 0, i, 2])
@@ -118,14 +126,12 @@ try:
             fh, fw = face.shape[:2]
             if fh > fw:
                 pad = (fh - fw) // 2
-                face_padded = cv2.copyMakeBorder(
-                    face, 0, 0, pad, fh - fw - pad, cv2.BORDER_CONSTANT, value=(0, 0, 0)
-                )
+                face_padded = cv2.copyMakeBorder(face, 0, 0, pad, fh - fw - pad,
+                                                 cv2.BORDER_CONSTANT, value=(0, 0, 0))
             elif fw > fh:
                 pad = (fw - fh) // 2
-                face_padded = cv2.copyMakeBorder(
-                    face, pad, fw - fh - pad, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0)
-                )
+                face_padded = cv2.copyMakeBorder(face, pad, fw - fh - pad, 0, 0,
+                                                 cv2.BORDER_CONSTANT, value=(0, 0, 0))
             else:
                 face_padded = face
 
@@ -140,47 +146,25 @@ try:
             if emotion_channels == 1:
                 face_gray = cv2.cvtColor(face_padded, cv2.COLOR_BGR2GRAY)
                 e = cv2.resize(face_gray, (48, 48)).astype("float32") / 255.0
-                e = np.expand_dims(e, axis=-1)  # (48,48,1)
+                e = np.expand_dims(e, axis=-1)
             else:
                 face_rgb = cv2.cvtColor(face_padded, cv2.COLOR_BGR2RGB)
                 e = cv2.resize(face_rgb, (48, 48)).astype("float32") / 255.0
 
-            e = np.expand_dims(e, axis=0)  # Batch dimension
+            e = np.expand_dims(e, axis=0)
             emotion_idx = np.argmax(emotion_model.predict(e, verbose=0))
             emotion = emotion_labels[emotion_idx]
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label = f"{avg_age}, {gender}, {emotion}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            results.append({
+                "age": avg_age,
+                "gender": gender,
+                "emotion": emotion
+            })
 
-            ty = y1 - 8 if y1 - th - 10 >= 0 else y2 + th + 8
-            by = y1 - th - 10 if y1 - th - 10 >= 0 else y2 + 10
+        return jsonify(results=results)
 
-            cv2.rectangle(frame, (x1, by), (x1 + tw, ty + 2), (0, 255, 0), -1)
-            cv2.putText(
-                frame,
-                label,
-                (x1, ty),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 255, 255),
-                2,
-            )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-        # Render once per frame; if GUI backend is unavailable, fail gracefully
-        try:
-            cv2.imshow(WIN_NAME, frame)
-        except Exception as e:
-            print(f"Warning: Display failed: {e}. Continuing without GUI.")
-            # Disable further imshow attempts by breaking the loop
-            break
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord("x"), ord("q")):
-            break
-finally:
-    video.release()
-    # Ensure all windows are closed even if an exception occurs
-    try:
-        cv2.destroyAllWindows()
-    except Exception:
-        pass
+if __name__ == '__main__':
+    app.run(debug=True)
